@@ -1,0 +1,208 @@
+---
+- name: Hardening RHEL servers
+  hosts: pruebas
+  vars:
+    unnecessary_services:
+      - postfix
+      - telnet
+      - cups
+      - sendemail
+      - hplip
+      - autofs
+      - atd
+      - ip6tables
+      - rhnsd
+      - nfs
+      - nfslock
+      - rpcgssd
+      - rpcidmapd
+      - rpcbind
+      - rpcsvcgssd
+      - rhsmcertd
+      - rlogin
+      - rhs
+      - rexec
+    kernel_parameters:
+      - net.ipv4.ip_forward = 1
+      - net.ipv4.conf.all.send_redirects = 0
+      - net.ipv4.conf.default.send_redirects = 0
+      - net.ipv4.conf.default.accept_source_route = 0
+      - net.ipv4.conf.all.accept_redirects = 0
+      - net.ipv4.conf.all.secure_redirects = 0
+      - net.ipv4.conf.all.log_martians = 1
+      - net.ipv4.conf.default.log_martians = 1
+      - net.ipv4.icmp_echo_ignore_broadcasts = 1
+      - icmp_ignore_bogus_error_responses = 1
+      - all.rp_filter = 1
+      - net.ipv4.conf.default.rp_filter = 1
+      - net.ipv4.tcp_syncookies = 1
+      - net.ipv6.conf.all.disable_ipv6 = 1
+      - net.ipv6.conf.default.disable_ipv6 = 1
+  tasks:
+    - name: disabled unnecesary services
+      service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      with_items: "{{ unnecessary_services }}"
+      ignore_errors: yes
+       
+    - name: kernel parameters
+      lineinfile:
+        path: /etc/sysctl.conf
+        line: "{{ item }}"
+        backup: yes
+      with_items: "{{ kernel_parameters }}"
+      ignore_errors: yes
+
+    - name: delated archives unnecessaries
+      file:
+        path: "/etc/hosts.{{ item }}"
+        state: absent
+      with_items:
+        - allow
+        - deny
+    
+    - name: configure rotate logs
+      lineinfile:
+        path: /etc/audit/auditd.conf
+        regexp: '^max_log_file_action'
+        line: max_log_file_action = ROTATE
+
+    #- name: validate audit service
+     # command: /usr/bin/systemctl is-enabled auditd
+     # ignore_errors: yes
+     # register: result
+
+    - name: activate audit
+      service:
+        name: auditd
+        enabled: yes
+        state: started
+
+    - name: sshd configurations
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.pre }}"
+        line: "{{ item.aft }}"
+      with_items:
+        - { pre: 'PermitRootLogin yes', aft: 'PermitRootLogin no' }
+        - { pre: '#LogLevel INFO', aft: 'LogLevel INFO' }
+        - { pre: '#IgnoreRhosts yes', aft: 'IgnoreRhosts yes' }
+        - { pre: '#HostbasedAuthentication no', aft: 'HostbasedAuthentication no' }
+        - { pre: '#PermitEmptyPasswords no', aft: 'PermitEmptyPasswords no' }
+        - { pre: '#PermitUserEnvironment no', aft: 'PermitUserEnvironment no' }
+        - { pre: '#ClientAliveInterval 0', aft: 'ClientAliveInterval 900' }
+        - { pre: '^#ClientAliveCountMax', aft: 'ClientAliveCountMax 0' }
+        - { pre: '#Banner none', aft: 'Banner /etc/ssh/sshd-banner' }
+        - { pre: '^#MaxAuthTries', aft: 'MaxAuthTries 5' }
+        - { pre: 'X11Forwarding yes', aft: 'X11Forwarding no' }
+        - { pre: '^#UseDNS', aft: 'UseDNS no'}
+
+    - name: sshd configurations 2
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        insertafter: "#ListenAddress ::"
+        line: "PROTOCOL 2"
+
+    - name: sshd configurations 3
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        insertafter: "#RekeyLimit default none"
+        line: "{{ item }}"
+      with_items:
+        - "MACs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1"
+        - "Ciphers aes128-ctr,aes192-ctr,aes256-ctr,blowfish-cbc,cast128-cbc,aes192-cbc,aes256-cbc"
+
+    - name: sshd-banner is created
+      file:
+        path: /etc/ssh/sshd-banner
+        owner: root
+        group: root
+        mode: 0760
+        state: touch
+
+    - name: sshd-banner is configured
+      lineinfile:
+        path: /etc/ssh/sshd-banner
+        line: "{{ item }}"
+      with_items:
+        - '                                WARNING'
+        - '        Authorized Use Only and the use of this system is restricted to'
+        - '         authorized persons only. All others will be prosecuted to the'
+        - '                        full extent of the law.'
+      ignore_errors: yes
+
+    - name: restart sshd service
+      service:
+        name: sshd
+        state: restarted
+
+    - name: changing hashing algorithm password to sha512
+      shell: authconfig --passalgo=md5 --update
+
+    - name: changing parameters passwords
+      lineinfile:
+        path: /etc/login.defs
+        regexp: "{{ item.pr }}"
+        line: "{{ item.af }}"
+      with_items:
+        - { pr: '^PASS_MAX_DAYS', af: 'PASS_MAX_DAYS   90' }
+        - { pr: '^PASS_MIN_DAYS', af: 'PASS_MIN_DAYS    7' }
+        - { pr: '^PASS_WARN_AGE', af: 'PASS_WARN_AGE   14' }
+
+    - name: created backup directory
+      file:
+        path: /root/bckp_files_config
+        state: directory
+        owner: root
+        group: root
+        mode: 0770
+
+    - name: backup files from pam and security
+      copy:
+        src: "{{ item }}"
+        dest: /root/bckp_files_config
+        remote_src: yes
+      with_items:
+        - '/etc/pam.d/password-auth'
+        - '/etc/pam.d/system-auth'
+        - '/etc/security/pwquality.conf'
+
+    - name: block user after 5 failed attempts
+      lineinfile:
+        path: /etc/pam.d/password-auth
+        insertafter: "^auth        required      pam_deny.so"
+        line: "auth        required      pam_tally2.so deny=5 unlock_time=600 file=/var        /log/faillog quiet"
+
+    - name: save password history, 12 registers
+      lineinfile:
+        path: /etc/pam.d/system-auth
+        regexp: '^password    sufficient'
+        line: "password    sufficient    pam_unix.so sha512 shadow nullok try_first_pas        s use_authtok remember=12"
+  
+    - name: definition password length, minimum 8 characters
+      lineinfile:
+        path: /etc/pam.d/system-auth
+        regexp: '^password    requisite'
+        line: "password    requisite     pam_pwquality.so try_first_pass local_users_on        ly retry=3 minlen=8 authtok_type="
+
+    - name: definition features password
+      lineinfile:
+        path: /etc/security/pwquality.conf
+        line: "{{ item }}"
+      with_items:
+        - "ucredit = -1"
+        - "dcredit = -1"
+        - "ocredit = -1"
+        - "lcredit = -1"
+        - "minlen = 8"
+
+    - name: Remove modules unnecessaries
+      shell: modprobe -rv "{{ item }}"
+      with_items:
+        - 'dccp'
+        - 'sctp'
+        - 'rds'
+        - 'tipc'
+
