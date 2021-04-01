@@ -139,7 +139,7 @@
         state: restarted
 
     - name: changing hashing algorithm password to sha512
-      shell: authconfig --passalgo=md5 --update
+      shell: authconfig --passalgo=sha512 --update
 
     - name: changing parameters passwords
       lineinfile:
