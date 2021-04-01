@@ -149,6 +149,7 @@
       with_items:
         - { pr: '^PASS_MAX_DAYS', af: 'PASS_MAX_DAYS   90' }
         - { pr: '^PASS_MIN_DAYS', af: 'PASS_MIN_DAYS    7' }
+        - { pr: '^PASS_MIN_LEN', af: 'PASS_MIN_LEN    8' }
         - { pr: '^PASS_WARN_AGE', af: 'PASS_WARN_AGE   14' }
 
     - name: created backup directory
